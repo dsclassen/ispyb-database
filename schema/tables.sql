@@ -1603,7 +1603,7 @@ CREATE TABLE `DataCollection` (
   `exposureTime` float DEFAULT NULL,
   `imageDirectory` varchar(255) DEFAULT NULL COMMENT 'The directory where synchweb wants the files to reside - should end with a slash',
   `imageDirectoryOriginal` varchar(255) DEFAULT NULL COMMENT 'Original directory where files reside - should end with a slash',
-  `imagePrefix` varchar(45) DEFAULT NULL,
+  `imagePrefix` varchar(65) DEFAULT NULL,
   `imageSuffix` varchar(45) DEFAULT NULL,
   `imageContainerSubPath` varchar(255) DEFAULT NULL COMMENT 'Internal path of a HDF5 file pointing to the data for this data collection',
   `fileTemplate` varchar(255) DEFAULT NULL,
