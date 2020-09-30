@@ -1,8 +1,8 @@
--- MariaDB dump 10.17  Distrib 10.4.13-MariaDB, for Linux (x86_64)
+-- MariaDB dump 10.17  Distrib 10.5.5-MariaDB, for Linux (x86_64)
 --
 -- Host: localhost    Database: ispyb_build
 -- ------------------------------------------------------
--- Server version	10.4.13-MariaDB
+-- Server version	10.5.5-MariaDB
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -344,8 +344,8 @@ CREATE TABLE `AutoProcScalingStatistics` (
   `ccHalf` float DEFAULT NULL COMMENT 'information from XDS',
   `ccAnomalous` float DEFAULT NULL,
   PRIMARY KEY (`autoProcScalingStatisticsId`),
-  KEY `AutoProcScalingStatisticsIdx1` (`autoProcScalingId`),
   KEY `AutoProcScalingStatistics_FKindexType` (`scalingStatisticsType`),
+  KEY `AutoProcScalingStatistics_scalingId_statisticsType` (`autoProcScalingId`,`scalingStatisticsType`),
   CONSTRAINT `_AutoProcScalingStatisticsFk1` FOREIGN KEY (`autoProcScalingId`) REFERENCES `AutoProcScaling` (`autoProcScalingId`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -603,6 +603,7 @@ DROP TABLE IF EXISTS `BLSampleGroup`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `BLSampleGroup` (
   `blSampleGroupId` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(100) DEFAULT NULL COMMENT 'Human-readable name',
   PRIMARY KEY (`blSampleGroupId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -1943,16 +1944,16 @@ DROP TABLE IF EXISTS `DewarRegistry`;
 CREATE TABLE `DewarRegistry` (
   `dewarRegistryId` int(11) unsigned NOT NULL AUTO_INCREMENT,
   `facilityCode` varchar(20) NOT NULL,
-  `proposalId` int(11) unsigned NOT NULL,
-  `labContactId` int(11) unsigned NOT NULL,
+  `proposalId` int(11) unsigned DEFAULT NULL,
+  `labContactId` int(11) unsigned DEFAULT NULL,
   `purchaseDate` datetime DEFAULT NULL,
   `bltimestamp` datetime NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`dewarRegistryId`),
   UNIQUE KEY `facilityCode` (`facilityCode`),
   KEY `DewarRegistry_ibfk_1` (`proposalId`),
   KEY `DewarRegistry_ibfk_2` (`labContactId`),
-  CONSTRAINT `DewarRegistry_ibfk_1` FOREIGN KEY (`proposalId`) REFERENCES `Proposal` (`proposalId`) ON DELETE CASCADE,
-  CONSTRAINT `DewarRegistry_ibfk_2` FOREIGN KEY (`labContactId`) REFERENCES `LabContact` (`labContactId`) ON DELETE CASCADE
+  CONSTRAINT `DewarRegistry_ibfk_1` FOREIGN KEY (`proposalId`) REFERENCES `Proposal` (`proposalId`) ON DELETE NO ACTION ON UPDATE CASCADE,
+  CONSTRAINT `DewarRegistry_ibfk_2` FOREIGN KEY (`labContactId`) REFERENCES `LabContact` (`labContactId`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1969,13 +1970,16 @@ CREATE TABLE `DewarRegistry_has_Proposal` (
   `proposalId` int(10) unsigned DEFAULT NULL,
   `personId` int(10) unsigned DEFAULT NULL COMMENT 'Person registering the dewar',
   `recordTimestamp` datetime DEFAULT current_timestamp(),
+  `labContactId` int(11) unsigned DEFAULT NULL COMMENT 'Owner of the dewar',
   PRIMARY KEY (`dewarRegistryHasProposalId`),
   UNIQUE KEY `dewarRegistryId` (`dewarRegistryId`,`proposalId`),
   KEY `DewarRegistry_has_Proposal_ibfk2` (`proposalId`),
   KEY `DewarRegistry_has_Proposal_ibfk3` (`personId`),
+  KEY `DewarRegistry_has_Proposal_ibfk4` (`labContactId`),
   CONSTRAINT `DewarRegistry_has_Proposal_ibfk1` FOREIGN KEY (`dewarRegistryId`) REFERENCES `DewarRegistry` (`dewarRegistryId`),
   CONSTRAINT `DewarRegistry_has_Proposal_ibfk2` FOREIGN KEY (`proposalId`) REFERENCES `Proposal` (`proposalId`),
-  CONSTRAINT `DewarRegistry_has_Proposal_ibfk3` FOREIGN KEY (`personId`) REFERENCES `Person` (`personId`)
+  CONSTRAINT `DewarRegistry_has_Proposal_ibfk3` FOREIGN KEY (`personId`) REFERENCES `Person` (`personId`),
+  CONSTRAINT `DewarRegistry_has_Proposal_ibfk4` FOREIGN KEY (`labContactId`) REFERENCES `LabContact` (`labContactId`) ON DELETE NO ACTION ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2077,6 +2081,7 @@ CREATE TABLE `DiffractionPlan` (
   `orientation` double DEFAULT NULL,
   `monoBandwidth` double DEFAULT NULL,
   `centringMethod` enum('xray','loop','diffraction','optical') DEFAULT NULL,
+  `userPath` varchar(100) DEFAULT NULL COMMENT 'User-specified relative "root" path inside the session directory to be used for holding collected data',
   PRIMARY KEY (`diffractionPlanId`),
   KEY `DiffractionPlan_ibfk1` (`presetForProposalId`),
   KEY `DataCollectionPlan_ibfk3` (`detectorId`),
@@ -5751,4 +5756,4 @@ SET character_set_client = @saved_cs_client;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2020-06-15 15:01:40
+-- Dump completed on 2020-09-08 16:26:27
