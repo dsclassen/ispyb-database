@@ -1,8 +1,8 @@
--- MariaDB dump 10.17  Distrib 10.4.13-MariaDB, for Linux (x86_64)
+-- MariaDB dump 10.18  Distrib 10.5.8-MariaDB, for Linux (x86_64)
 --
 -- Host: localhost    Database: ispyb_build
 -- ------------------------------------------------------
--- Server version	10.4.13-MariaDB
+-- Server version	10.5.8-MariaDB
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -1075,6 +1075,165 @@ BEGIN
 
 	CLOSE schedule_component_cursor;
 END ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 DROP PROCEDURE IF EXISTS `insert_phasing_analysis_results` */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8 */ ;
+/*!50003 SET character_set_results = utf8 */ ;
+/*!50003 SET collation_connection  = utf8_general_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+CREATE PROCEDURE `insert_phasing_analysis_results`(OUT p_id int(11) unsigned, IN p_phasing_result JSON, IN p_autoProcScalingId int(10) unsigned)
+    MODIFIES SQL DATA
+    COMMENT 'Insert all the results from a phasing into the relevant database tables. Returns the top-level phasing ID in p_id.'
+`proc_body`:
+BEGIN
+
+  DECLARE v_phasingAnalysisId int(11) unsigned DEFAULT NULL;
+  DECLARE v_phasingProgramRunId int(11) unsigned DEFAULT NULL;
+  DECLARE v_phasingHasScalingId int(11) unsigned DEFAULT NULL;
+  DECLARE v_no_stats int unsigned DEFAULT 0;
+  DECLARE v_no_attachments int unsigned DEFAULT 0;
+  DECLARE i int unsigned DEFAULT 0;
+
+  
+  IF NOT json_valid(p_phasing_result) THEN
+    SIGNAL SQLSTATE '45000' SET MYSQL_ERRNO=1644, 
+      MESSAGE_TEXT='JSON document is invalid.';
+    LEAVE `proc_body`;
+  END IF;
+  
+  IF NOT json_exists(p_phasing_result,'$.PhasingContainer') THEN
+    SIGNAL SQLSTATE '45000' SET MYSQL_ERRNO=1644, 
+      MESSAGE_TEXT='JSON document must have a PhasingContainer element.';
+    LEAVE `proc_body`;
+  END IF;
+
+  IF NOT json_exists(p_phasing_result,
+    '$.PhasingContainer.PhasingAnalysis[0].recordTimeStamp') THEN
+    SIGNAL SQLSTATE '45000' SET MYSQL_ERRNO=1644, 
+      MESSAGE_TEXT='JSON document must have a PhasingContainer.PhasingAnalysis[0].recordTimeStamp element.';
+    LEAVE `proc_body`;
+  END IF;
+
+  START TRANSACTION;
+
+  INSERT INTO PhasingAnalysis (recordTimeStamp) VALUES (JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PhasingAnalysis[0].recordTimeStamp')));
+  SET v_phasingAnalysisId := last_insert_id();
+
+  INSERT INTO Phasing_has_Scaling (phasingAnalysisId, autoProcScalingId) 
+    VALUES (v_phasingAnalysisId, p_autoProcScalingId);
+  SET v_phasingHasScalingId := last_insert_id(); 
+
+  SET v_no_stats := JSON_LENGTH(p_phasing_result, '$.PhasingContainer.Phasing_has_ScalingContainer.PhasingStatistics');
+  SET i := 0;
+  WHILE i < v_no_stats DO
+    INSERT INTO PhasingStatistics (phasingHasScalingId1, numberOfBins, binNumber, lowRes, highRes, metric, statisticsValue, nReflections) 
+      VALUES (
+        v_phasingHasScalingId,
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.Phasing_has_ScalingContainer.PhasingStatistics[', i, '].numberOfBins'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.Phasing_has_ScalingContainer.PhasingStatistics[', i, '].binNumber'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.Phasing_has_ScalingContainer.PhasingStatistics[', i, '].lowRes'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.Phasing_has_ScalingContainer.PhasingStatistics[', i, '].highRes'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.Phasing_has_ScalingContainer.PhasingStatistics[', i, '].metric'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.Phasing_has_ScalingContainer.PhasingStatistics[', i, '].statisticsValue'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.Phasing_has_ScalingContainer.PhasingStatistics[', i, '].nReflections')))        
+      );
+    SET i := i + 1;
+  END WHILE;
+  
+  INSERT INTO PhasingProgramRun (
+    phasingCommandLine, phasingPrograms, phasingStatus, phasingMessage, phasingStartTime, phasingEndTime) 
+    VALUES (
+      substr(JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PhasingProgramRun[0].phasingCommandLine')), 1, 255),
+      JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PhasingProgramRun[0].phasingPrograms')),
+      JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PhasingProgramRun[0].phasingStatus')),
+      JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PhasingProgramRun[0].phasingMessage')),
+      JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PhasingProgramRun[0].phasingStartTime')),
+      JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PhasingProgramRun[0].phasingEndTime'))
+    );
+  SET v_phasingProgramRunId := last_insert_id(); 
+
+  IF json_exists(p_phasing_result,
+    '$.PhasingContainer.PreparePhasingData') THEN
+    INSERT INTO PreparePhasingData (phasingAnalysisId, phasingProgramRunId, spaceGroupId, lowRes, highRes) 
+      VALUES (
+        v_phasingAnalysisId,
+        v_phasingProgramRunId,
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PreparePhasingData[0].spaceGroupId')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PreparePhasingData[0].lowRes')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.PreparePhasingData[0].highRes'))
+      );
+  END IF;
+    
+  IF json_exists(p_phasing_result,
+    '$.PhasingContainer.Phasing') THEN
+    INSERT INTO Phasing (phasingAnalysisId, phasingProgramRunId, spaceGroupId, method, solventContent, enantiomorph, lowRes, highRes) 
+      VALUES (
+        v_phasingAnalysisId,
+        v_phasingProgramRunId,
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.Phasing[0].spaceGroupId')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.Phasing[0].method')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.Phasing[0].solventContent')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.Phasing[0].enantiomorph')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.Phasing[0].lowRes')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.Phasing[0].highRes'))
+      );
+  END IF;
+
+  IF json_exists(p_phasing_result,
+    '$.PhasingContainer.ModelBuilding') THEN
+    INSERT INTO ModelBuilding (phasingAnalysisId, phasingProgramRunId, spaceGroupId, lowRes, highRes)
+      VALUES (
+        v_phasingAnalysisId,
+        v_phasingProgramRunId,
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.ModelBuilding[0].spaceGroupId')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.ModelBuilding[0].lowRes')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.ModelBuilding[0].highRes'))
+      ); 
+  END IF;
+  
+  IF json_exists(p_phasing_result,
+    '$.PhasingContainer.SubstructureDetermination') THEN  
+    INSERT INTO SubstructureDetermination (phasingAnalysisId, phasingProgramRunId, spaceGroupId, method, lowRes, highRes)
+      VALUES (
+        v_phasingAnalysisId,
+        v_phasingProgramRunId,
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.SubstructureDetermination[0].spaceGroupId')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.SubstructureDetermination[0].method')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.SubstructureDetermination[0].lowRes')),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, '$.PhasingContainer.SubstructureDetermination[0].highRes'))
+      );
+  END IF;
+
+  IF json_exists(p_phasing_result,
+    '$.PhasingContainer.PhasingProgramAttachment') THEN
+    SET v_no_attachments := JSON_LENGTH(p_phasing_result, '$.PhasingContainer.PhasingProgramAttachment');
+    SET i := 0;
+    WHILE i < v_no_attachments DO
+    INSERT INTO PhasingProgramAttachment (phasingProgramRunId, fileType, fileName, filePath, recordTimeStamp)
+      VALUES (
+        v_phasingProgramRunId,
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.PhasingProgramAttachment[', i, '].fileType'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.PhasingProgramAttachment[', i, '].fileName'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.PhasingProgramAttachment[', i, '].filePath'))),
+        JSON_UNQUOTE(JSON_EXTRACT(p_phasing_result, concat('$.PhasingContainer.PhasingProgramAttachment[', i, '].recordTimeStamp')))
+      );
+      SET i := i + 1;
+    END WHILE;
+  END IF;
+
+
+  SET p_id := v_phasingAnalysisId;
+  COMMIT;
+END `proc_body` ;;
 DELIMITER ;
 /*!50003 SET sql_mode              = @saved_sql_mode */ ;
 /*!50003 SET character_set_client  = @saved_cs_client */ ;
@@ -3724,7 +3883,7 @@ BEGIN
     IF p_id IS NOT NULL AND p_program IS NOT NULL THEN
       SELECT dc.dataCollectionId, app.autoProcProgramId,
         app.processingStatus,
-        concat('[', group_concat(json_object('fileType', appa.fileType, 'fullFilePath', concat(appa.filePath, '/', appa.fileName))), ']') "processingAttachments"
+        concat('[', group_concat(json_object('fileType', appa.fileType, 'fullFilePath', concat(appa.filePath, '/', appa.fileName), 'importanceRank', appa.importanceRank)), ']') "processingAttachments"
       FROM DataCollection dc
         INNER JOIN AutoProcIntegration api
           ON api.dataCollectionId = dc.dataCollectionId
@@ -3757,7 +3916,7 @@ DELIMITER ;
 /*!50003 SET sql_mode              = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
 DELIMITER ;;
 CREATE PROCEDURE `retrieve_processing_program_attachments_for_dc_group_program_v2`(
-    p_id int unsigned,
+    p_id int unsigned, 
     p_program varchar(255),
     p_authLogin varchar(45)
 )
@@ -3768,22 +3927,22 @@ BEGIN
         IF p_authLogin IS NOT NULL THEN
             SELECT dc.dataCollectionId, app.autoProcProgramId,
                 app.processingStatus,
-                concat('[', group_concat(json_object('fileType', appa.fileType, 'fullFilePath', concat(appa.filePath, '/', appa.fileName))), ']') "processingAttachments"
+                concat('[', group_concat(json_object('fileType', appa.fileType, 'fullFilePath', concat(appa.filePath, '/', appa.fileName), 'importanceRank', appa.importanceRank)), ']') "processingAttachments"
             FROM DataCollection dc
                 INNER JOIN AutoProcIntegration api ON api.dataCollectionId = dc.dataCollectionId
                 INNER JOIN AutoProcProgram app ON app.autoProcProgramId = api.autoProcProgramId
                 INNER JOIN AutoProcProgramAttachment appa ON appa.autoProcProgramId = api.autoProcProgramId
                 INNER JOIN DataCollectionGroup dcg ON dcg.dataCollectionGroupId = dc.dataCollectionGroupId
                 INNER JOIN Session_has_Person shp ON shp.sessionId = dcg.sessionId
-                INNER JOIN Person per ON per.personId = shp.personId
+                INNER JOIN Person per ON per.personId = shp.personId 
             WHERE
                 dc.dataCollectionGroupId = p_id AND app.processingPrograms = p_program AND per.login = p_authLogin
             GROUP BY
                 dc.dataCollectionId, app.autoProcProgramId, app.processingStatus;
-        ELSE
+        ELSE 
             SELECT dc.dataCollectionId, app.autoProcProgramId,
                 app.processingStatus,
-                concat('[', group_concat(json_object('fileType', appa.fileType, 'fullFilePath', concat(appa.filePath, '/', appa.fileName))), ']') "processingAttachments"
+                concat('[', group_concat(json_object('fileType', appa.fileType, 'fullFilePath', concat(appa.filePath, '/', appa.fileName), 'importanceRank', appa.importanceRank)), ']') "processingAttachments"
             FROM DataCollection dc
                 INNER JOIN AutoProcIntegration api ON api.dataCollectionId = dc.dataCollectionId
                 INNER JOIN AutoProcProgram app ON app.autoProcProgramId = api.autoProcProgramId
@@ -3819,7 +3978,7 @@ CREATE PROCEDURE `retrieve_processing_program_attachments_for_program_id`(p_id i
 BEGIN
     IF p_id IS NOT NULL THEN
       SELECT
-        appa.autoProcProgramAttachmentId "attachmentId", appa.fileType "fileType", appa.filePath "filePath", appa.fileName "fileName"
+        appa.autoProcProgramAttachmentId "attachmentId", appa.fileType "fileType", appa.filePath "filePath", appa.fileName "fileName", appa.importanceRank "importanceRank"
       FROM AutoProcProgramAttachment appa
       WHERE appa.autoProcProgramId = p_id;
     ELSE
@@ -3843,7 +4002,7 @@ DELIMITER ;
 /*!50003 SET sql_mode              = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
 DELIMITER ;;
 CREATE PROCEDURE `retrieve_processing_program_attachments_for_program_id_v2`(
-    p_id int unsigned,
+    p_id int unsigned,	
     p_authLogin varchar(45)
 )
     READS SQL DATA
@@ -3852,19 +4011,19 @@ BEGIN
     IF p_id IS NOT NULL THEN
         IF p_authLogin IS NOT NULL THEN
             SELECT
-                appa.autoProcProgramAttachmentId "attachmentId", appa.fileType "fileType", appa.filePath "filePath", appa.fileName "fileName"
+                appa.autoProcProgramAttachmentId "attachmentId", appa.fileType "fileType", appa.filePath "filePath", appa.fileName "fileName", appa.importanceRank "importanceRank"
             FROM AutoProcProgramAttachment appa
                 INNER JOIN AutoProcProgram app ON app.autoProcProgramId = appa.autoProcProgramId
                 INNER JOIN ProcessingJob pj ON pj.processingJobId = app.processingJobId
                 INNER JOIN DataCollection dc ON dc.dataCollectionId = pj.dataCollectionId
                 INNER JOIN DataCollectionGroup dcg ON dcg.dataCollectionGroupId = dc.dataCollectionGroupId
                 INNER JOIN Session_has_Person shp ON shp.sessionId = dcg.sessionId
-                INNER JOIN Person per ON per.personId = shp.personId
+                INNER JOIN Person per ON per.personId = shp.personId 
             WHERE appa.autoProcProgramId = p_id AND per.login = p_authLogin
-            GROUP BY appa.autoProcProgramAttachmentId, appa.fileType, appa.filePath, appa.fileName;
+            GROUP BY appa.autoProcProgramAttachmentId, appa.fileType, appa.filePath, appa.fileName, appa.importanceRank;
         ELSE
             SELECT
-                appa.autoProcProgramAttachmentId "attachmentId", appa.fileType "fileType", appa.filePath "filePath", appa.fileName "fileName"
+                appa.autoProcProgramAttachmentId "attachmentId", appa.fileType "fileType", appa.filePath "filePath", appa.fileName "fileName", appa.importanceRank "importanceRank"
             FROM AutoProcProgramAttachment appa
             WHERE appa.autoProcProgramId = p_id;
         END IF;
@@ -3954,6 +4113,139 @@ BEGIN
         SIGNAL SQLSTATE '45000' SET MYSQL_ERRNO=1644, MESSAGE_TEXT='Mandatory argument p_dcId is NULL';
     END IF;
 
+END ;;
+DELIMITER ;
+/*!50003 SET sql_mode              = @saved_sql_mode */ ;
+/*!50003 SET character_set_client  = @saved_cs_client */ ;
+/*!50003 SET character_set_results = @saved_cs_results */ ;
+/*!50003 SET collation_connection  = @saved_col_connection */ ;
+/*!50003 DROP PROCEDURE IF EXISTS `retrieve_sample` */;
+/*!50003 SET @saved_cs_client      = @@character_set_client */ ;
+/*!50003 SET @saved_cs_results     = @@character_set_results */ ;
+/*!50003 SET @saved_col_connection = @@collation_connection */ ;
+/*!50003 SET character_set_client  = utf8 */ ;
+/*!50003 SET character_set_results = utf8 */ ;
+/*!50003 SET collation_connection  = utf8_general_ci */ ;
+/*!50003 SET @saved_sql_mode       = @@sql_mode */ ;
+/*!50003 SET sql_mode              = 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION' */ ;
+DELIMITER ;;
+CREATE PROCEDURE `retrieve_sample`(p_id int unsigned, p_useContainerSession boolean, p_authLogin varchar(45))
+    READS SQL DATA
+    COMMENT 'Returns a single-row result-set with the sample for the given ID'
+BEGIN
+    IF p_id IS NOT NULL THEN
+
+      IF p_useContainerSession = True THEN
+
+        IF p_authLogin IS NOT NULL THEN
+        
+
+          SELECT DISTINCT bls.blSampleId "sampleId",
+            bls.containerId "containerId",
+            bls.diffractionPlanId "dataCollectionPlanId",
+            bls.name "sampleName",
+            bls.code "sampleCode",
+            bls.comments "sampleComments",
+            bls.location "sampleLocation",
+            bls.subLocation "sampleSubLocation",
+            bls.blSampleStatus "sampleStatus",
+            p.proposalId "proposalId",
+            p.proposalCode "proposalCode",
+            p.proposalNumber "proposalNumber",
+            bs.sessionId "sessionId",
+            bs.visit_number "sessionNumber"
+          FROM BLSample bls
+            INNER JOIN Container c ON c.containerId = bls.containerId
+            INNER JOIN BLSession bs ON c.sessionId = bs.sessionId
+            INNER JOIN Proposal p ON p.proposalId = bs.proposalId
+            INNER JOIN BLSession bs2 ON bs2.proposalId = p.proposalId
+            INNER JOIN Session_has_Person shp ON bs2.sessionId = shp.sessionId
+            INNER JOIN Person pe ON pe.personId = shp.personId
+          WHERE pe.login = p_authLogin AND	bls.blSampleId = p_id;
+
+        ELSE
+
+          SELECT bls.blSampleId "sampleId",
+            bls.containerId "containerId",
+            bls.diffractionPlanId "dataCollectionPlanId",
+            bls.name "sampleName",
+            bls.code "sampleCode",
+            bls.comments "sampleComments",
+            bls.location "sampleLocation",
+            bls.subLocation "sampleSubLocation",
+            bls.blSampleStatus "sampleStatus",
+            p.proposalId "proposalId",
+            p.proposalCode "proposalCode",
+            p.proposalNumber "proposalNumber",
+            bs.sessionId "sessionId",
+            bs.visit_number "sessionNumber"
+          FROM BLSample bls
+            INNER JOIN Container c ON c.containerId = bls.containerId
+            INNER JOIN BLSession bs ON c.sessionId = bs.sessionId
+            INNER JOIN Proposal p ON p.proposalId = bs.proposalId
+          WHERE bls.blSampleId = p_id;
+
+        END IF;
+
+      ELSE
+
+        IF p_authLogin IS NOT NULL THEN
+        
+
+          SELECT DISTINCT bls.blSampleId "sampleId",
+            bls.containerId "containerId",
+            bls.diffractionPlanId "dataCollectionPlanId",
+            bls.name "sampleName",
+            bls.code "sampleCode",
+            bls.comments "sampleComments",
+            bls.location "sampleLocation",
+            bls.subLocation "sampleSubLocation",
+            bls.blSampleStatus "sampleStatus",
+            p.proposalId "proposalId",
+            p.proposalCode "proposalCode",
+            p.proposalNumber "proposalNumber",
+            NULL "sessionId",
+            NULL "sessionNumber"
+          FROM BLSample bls
+            INNER JOIN Container c ON c.containerId = bls.containerId
+            INNER JOIN Dewar d ON d.dewarId = c.dewarId
+            INNER JOIN Shipping s ON s.shippingId = d.shippingId
+            INNER JOIN Proposal p ON p.proposalId = s.proposalId
+            INNER JOIN BLSession bs ON bs.proposalId = p.proposalId
+            INNER JOIN Session_has_Person shp ON bs.sessionId = shp.sessionId
+            INNER JOIN Person pe ON pe.personId = shp.personId
+          WHERE pe.login = p_authLogin AND	bls.blSampleId = p_id;
+
+        ELSE
+
+          SELECT bls.blSampleId "sampleId",
+            bls.containerId "containerId",
+            bls.diffractionPlanId "dataCollectionPlanId",
+            bls.name "sampleName",
+            bls.code "sampleCode",
+            bls.comments "sampleComments",
+            bls.location "sampleLocation",
+            bls.subLocation "sampleSubLocation",
+            bls.blSampleStatus "sampleStatus",
+            p.proposalId "proposalId",
+            p.proposalCode "proposalCode",
+            p.proposalNumber "proposalNumber",
+            NULL "sessionId",
+            NULL "sessionNumber"
+          FROM BLSample bls
+            INNER JOIN Container c ON c.containerId = bls.containerId
+            INNER JOIN Dewar d ON d.dewarId = c.dewarId
+            INNER JOIN Shipping s ON s.shippingId = d.shippingId
+            INNER JOIN Proposal p ON p.proposalId = s.proposalId
+          WHERE bls.blSampleId = p_id;
+
+        END IF;
+
+      END IF;
+
+    ELSE
+      SIGNAL SQLSTATE '45000' SET MYSQL_ERRNO=1644, MESSAGE_TEXT='Mandatory argument p_id can not be NULL';
+  END IF;
 END ;;
 DELIMITER ;
 /*!50003 SET sql_mode              = @saved_sql_mode */ ;
@@ -7960,12 +8252,12 @@ DELIMITER ;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2020-07-13 20:02:24
--- MariaDB dump 10.17  Distrib 10.4.13-MariaDB, for Linux (x86_64)
+-- Dump completed on 2020-12-01 12:22:39
+-- MariaDB dump 10.18  Distrib 10.5.8-MariaDB, for Linux (x86_64)
 --
 -- Host: localhost    Database: ispyb_build
 -- ------------------------------------------------------
--- Server version	10.4.13-MariaDB
+-- Server version	10.5.8-MariaDB
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
 /*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
@@ -8006,4 +8298,4 @@ DELIMITER ;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2020-07-13 20:02:24
+-- Dump completed on 2020-12-01 12:22:40
